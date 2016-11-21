@@ -1,15 +1,21 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib import cm
+import matplotlib
+from matplotlib import cm,colors
 from mpl_toolkits.mplot3d import Axes3D
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 import os
 import logging
 
 
 class Visualizer(object):
 
-    def __init__(self, fanova):
+    def __init__(self, fanova,custom_scale = []):
         self._fanova = fanova
+        self.outfile_type = ".pdf" #.png
+        self.custom_scale = custom_scale
+        self.do_custom_scaling = bool(custom_scale)
+        matplotlib.rcParams.update({'font.size': 32, 'figure.figsize': [30,24],'lines.linewidth':14,'lines.markersize':22})
 
     def create_all_plots(self, directory, **kwargs):
         """
@@ -78,7 +84,7 @@ class Visualizer(object):
 
         return (dim, param_name)
 
-    def plot_pairwise_marginal(self, param_1, param_2, lower_bound_1=0, upper_bound_1=1, lower_bound_2=0, upper_bound_2=1, resolution=20):
+    def plot_pairwise_marginal(self, param_1, param_2, lower_bound_1=0, upper_bound_1=1, lower_bound_2=0, upper_bound_2=1, resolution=200):
 
         dim1, param_name_1 = self._check_param(param_1)
         dim2, param_name_2 = self._check_param(param_2)
@@ -86,30 +92,165 @@ class Visualizer(object):
         grid_1 = np.linspace(lower_bound_1, upper_bound_1, resolution)
         grid_2 = np.linspace(lower_bound_2, upper_bound_2, resolution)
 
-        xx, yy = np.meshgrid(grid_1, grid_2)
-
         zz = np.zeros([resolution * resolution])
-        for i, x_value in enumerate(grid_1):
-            for j, y_value in enumerate(grid_2):
-                zz[i * resolution + j] = self._fanova._get_marginal_for_value_pair(dim1, dim2, x_value, y_value)[0]
-
+        zz_standard_dev = np.zeros([resolution * resolution])
+        for i, y_value in enumerate(grid_2):
+            for j, x_value in enumerate(grid_1):
+                zz[i * resolution + j],zz_standard_dev[i * resolution + j] = self._fanova._get_marginal_for_value_pair(dim1, dim2, x_value, y_value)
+                
         zz = np.reshape(zz, [resolution, resolution])
-
-        display_grid_1 = [self._fanova.get_config_space().unormalize_value(param_name_1, value) for value in grid_1]
-        display_grid_2 = [self._fanova.get_config_space().unormalize_value(param_name_2, value) for value in grid_2]
+        zz_standard_dev = np.reshape(zz_standard_dev, [resolution, resolution])        
+        
+        display_grid_1 = [self._fanova.unormalize_value(param_name_1, value) for value in grid_1]
+        display_grid_2 = [self._fanova.unormalize_value(param_name_2, value) for value in grid_2]
 
         display_xx, display_yy = np.meshgrid(display_grid_1, display_grid_2)
+        
+        single_plot = False
+        
+        if single_plot:
+            
+            fig = plt.figure()
+            #ax = fig.gca(projection='3d')
+            
+            ax = Axes3D(fig)
+    
+            surface = ax.plot_surface(display_xx, display_yy, zz, rstride=1, cstride=1, cmap=cm.jet, linewidth=0, antialiased=False, alpha = 0.5)
+            #contour(display_xx, display_yy, zz, rstride=1, cstride=1, cmap=cm.jet, linewidth=0, antialiased=False, alpha = 0.5)
+            ax.set_xlabel(param_name_1)
+            ax.set_ylabel(param_name_2)
+            ax.set_zlabel("Marginalized Z-AUC")
+            
+            fig.colorbar(surface, shrink=0.5, aspect=5)
+        
+            """
+            TK: add the points to plot where the function was evaluated
+            
+            """       
+            eval_values_param_1 = self._fanova.get_test_values_for_param(param_name_1)
+            eval_values_param_2 = self._fanova.get_test_values_for_param(param_name_2)
+            
+        
+            
+            eval_x_values_1 = []
+            eval_x_values_2 = []
+            eval_y_values = []
+            
+            if param_name_1 in self._fanova.get_config_space().get_integer_parameters():
+                for value in eval_values_param_1: 
+                    eval_x_values_1.append(int(value))
+            else:
+                for value in eval_values_param_1:
+                    eval_x_values_1.append(float(value))
+            
+            if param_name_2 in self._fanova.get_config_space().get_integer_parameters():
+                for value in eval_values_param_2: 
+                    eval_x_values_2.append(int(value))  
+            else:
+                for value in eval_values_param_2:
+                    eval_x_values_2.append(float(value))
+       
+            
+            for ii in range(len(eval_x_values_1)):
+                normalized_val_1 = self._fanova.normalize_value(param_name_1,eval_x_values_1[ii])
+                normalized_val_2 = self._fanova.normalize_value(param_name_2,eval_x_values_2[ii])
+                eval_y_values.append(self._fanova._get_marginal_for_value_pair(dim1,dim2,normalized_val_1,normalized_val_2)[0])
+            #ax.scatter(eval_x_values_1, eval_x_values_2, eval_y_values,linewidth=0, antialiased=False)        
+            ax.plot
+        
+        else:
+            
+            n_colorbar = 10 #granularity of the colorbar
+            
+            fig, (ax1, ax2) = plt.subplots(1, 2, sharey=True,figsize=(30,10))
+            #fig = plt.figure()
+            #ax = fig.gca(projection='3d')
+            
+            #ax = Axes3D(fig)
+            plt.subplots_adjust(wspace = 0.4)
+            #surface = ax.plot_surface(display_xx, display_yy, zz, rstride=1, cstride=1, cmap=cm.jet, linewidth=0, antialiased=False, alpha = 0.5)
+            
+            #cmap_custom = colors.LinearSegmentedColormap('my_map', cdict, N=256, gamma=1.0)            
+            if self.do_custom_scaling:
+                cont_mean = ax1.contourf(display_xx, display_yy, zz, rstride=1, cstride=1,cmap = cm.jet_r, linewidth=0, antialiased=False, alpha = 0.5,vmin= self.custom_scale[0], vmax=self.custom_scale[1])
+            else:
+                cont_mean = ax1.contourf(display_xx, display_yy, zz, rstride=1, cstride=1,cmap = cm.jet_r, linewidth=0, antialiased=False, alpha = 0.5)
+            cont_sd = ax2.contourf(display_xx, display_yy, zz_standard_dev, rstride=1, cstride=1,cmap = cm.autumn_r, linewidth=0, antialiased=False, alpha = 0.5)
+           
+            ax1.set_xlabel(param_name_1)
+            ax1.set_ylabel(param_name_2)
+            ax1.set_title('Marginalized Z-AUC')
+            
+            ax2.set_xlabel(param_name_1)
+            #ax2.set_ylabel(param_name_2)
+            ax2.set_title('Std of Prediction')
+            
+            ## split plot for colorbar and plot
+            
+            #for ax1
+            div = make_axes_locatable(ax1)
+            cax = div.append_axes("right", size="12%", pad=0.05)
+        
 
-        fig = plt.figure()
-        #ax = fig.gca(projection='3d')
-        ax = Axes3D(fig)
+            cbar = plt.colorbar(cont_mean, cax=cax, ticks = np.linspace(np.amin(zz),np.amax(zz),num = n_colorbar), format="%.3g")
+                
+            #cbar.set_label('Marginalized Z-AUC',labelpad=10)#, size=22)
+            #ax1.xaxis.set_visible(False)
+            #ax1.yaxis.set_visible(False)
+            
+            
+            #ax1.colorbar(cont_mean, shrink=0.5, aspect=5)
+        
+            #for ax2
+  
+            div = make_axes_locatable(ax2)
+            cax = div.append_axes("right", size="12%", pad=0.05)
+            cbar = plt.colorbar(cont_sd, cax=cax, ticks = np.linspace(np.amin(zz_standard_dev),np.amax(zz_standard_dev),num = n_colorbar), format="%.3g")
+            cbar.set_label('Standard Deviation')#, size=22)
+        
+            """
+            TK: add the points to plot where the function was evaluated
+            
+            """       
+            eval_values_param_1 = self._fanova.get_test_values_for_param(param_name_1)
+            eval_values_param_2 = self._fanova.get_test_values_for_param(param_name_2)
+            
+        
+            
+            eval_x_values_1 = []
+            eval_x_values_2 = []
+            eval_y_values = []
+            
+            if param_name_1 in self._fanova.get_config_space().get_integer_parameters():
+                for value in eval_values_param_1: 
+                    eval_x_values_1.append(int(value))
+            else:
+                for value in eval_values_param_1:
+                    eval_x_values_1.append(float(value))
+            
+            if param_name_2 in self._fanova.get_config_space().get_integer_parameters():
+                for value in eval_values_param_2: 
+                    eval_x_values_2.append(int(value))  
+            else:
+                for value in eval_values_param_2:
+                    eval_x_values_2.append(float(value))
+       
+            
+            for ii in range(len(eval_x_values_1)):
+                normalized_val_1 = self._fanova.normalize_value(param_name_1,eval_x_values_1[ii])
+                normalized_val_2 = self._fanova.normalize_value(param_name_2,eval_x_values_2[ii])
+                eval_y_values.append(self._fanova._get_marginal_for_value_pair(dim1,dim2,normalized_val_1,normalized_val_2)[0])
+                
+            #ax1.scatter(eval_x_values_1, eval_x_values_2, eval_y_values, antialiased=False,marker='x',c = 'black')  
+            #ax2.scatter(eval_x_values_1, eval_x_values_2, eval_y_values, antialiased=False,marker='x',c = 'black')
+            
+            ax1.scatter(eval_x_values_1, eval_x_values_2, s = 10,antialiased=False,marker='x',c = 'black')  
+            ax2.scatter(eval_x_values_1, eval_x_values_2, s = 10,antialiased=False,marker='x',c = 'black')
+            
+         
+        
+        return fig
 
-        surface = ax.plot_surface(display_xx, display_yy, zz, rstride=1, cstride=1, cmap=cm.jet, linewidth=0, antialiased=False)
-        ax.set_xlabel(param_name_1)
-        ax.set_ylabel(param_name_2)
-        ax.set_zlabel("Performance")
-        fig.colorbar(surface, shrink=0.5, aspect=5)
-        return plt
 
     def plot_marginal(self, param, lower_bound=0, upper_bound=1, is_int=False, resolution=100):
         if isinstance(param, int):
@@ -144,5 +285,41 @@ class Visualizer(object):
         plt.fill_between(display_grid, upper_curve, lower_curve, facecolor='red', alpha=0.6)
         plt.xlabel(param_name)
 
-        plt.ylabel("Performance")
+        plt.ylabel("Marginalized Z-AUC")
+        
+        """
+        TK: add the points to plot where the function was evaluated
+        
+        """
+        plt.hold(True)
+        
+        eval_values = self._fanova.get_test_values_for_param(param_name)
+        
+        eval_x_values = []
+        eval_y_values = []
+        if param_name in self._fanova.get_config_space().get_integer_parameters():
+            for value in eval_values: 
+                eval_x_values.append(int(value))
+                (m,s) = self._fanova.get_marginal_for_value(dim, self._fanova.normalize_value(param_name,value))               
+                eval_y_values.append(m)
+           
+        else:
+            for value in eval_values:
+                eval_x_values.append(float(value))
+                (m,s) = self._fanova.get_marginal_for_value(dim, self._fanova.normalize_value(param_name,value))    
+                eval_y_values.append(m)
+
+        
+        plt.plot(eval_x_values,eval_y_values,'o',color = '0.85')   
+        
+        print("do_custom_scaling is: {}".format(self.do_custom_scaling))
+        if self.do_custom_scaling:
+            axes = plt.gca()           
+            axes.set_ylim(self.custom_scale)
+            axes.tick_params(axis='both', which='major', pad=20)
+            axes.yaxis.grid(color='grey', linestyle='dashed',linewidth=3)
+            axes.xaxis.grid(color='grey', linestyle='dashed',linewidth=3)
+            axes.set_axisbelow(True)
+            #plt.ylim = self.custom_scale
+        
         return plt
